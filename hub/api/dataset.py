@@ -914,7 +914,8 @@ class Dataset:
         else:
             try:
                 meta_path = posixpath.join(self._path, defaults.META_FILE)
-                if not fs.exists(self._path) or not fs.exists(meta_path):
+                ls = fs.ls(self._path)
+                if not ls or fs._strip_protocol(meta_path) not in ls:
                     return "a"
                 bytes_ = bytes("Hello", "utf-8")
                 path = posixpath.join(self._path, "mode_test")

@@ -810,6 +810,7 @@ def test_dataset_copy_s3_local():
     )
     for i in range(100):
         ds["num", i] = 2 * i
+    Dataset.delete("s3://snark-test/cp_copy_data_s3_1_a")
     ds2 = ds.copy("s3://snark-test/cp_copy_data_s3_1_a")
     ds3 = ds2.copy("./data/testing/cp_copy_data_local_1")
     for i in range(100):
@@ -827,6 +828,7 @@ def test_dataset_copy_gcs_local():
     )
     for i in range(100):
         ds["num", i] = 2 * i
+    Dataset.delete("gcs://snark-test/cp_copy_dataset_gcs_1a")
     ds2 = ds.copy("gcs://snark-test/cp_copy_dataset_gcs_1a")
     ds3 = ds2.copy("./data/testing/cp_copy_ds_local_2")
     for i in range(100):
@@ -849,6 +851,9 @@ def test_dataset_copy_azure_local():
     for i in range(100):
         ds["num", i] = 2 * i
     ds2 = ds.copy("./data/testing/cp_copy_ds_local_4")
+    Dataset.delete(
+        "https://activeloop.blob.core.windows.net/activeloop-hub/cp_copy_test_ds_azure_2"
+    )
     ds3 = ds2.copy(
         "https://activeloop.blob.core.windows.net/activeloop-hub/cp_copy_test_ds_azure_2",
         token=token,
@@ -869,6 +874,7 @@ def test_dataset_copy_hub_local():
     for i in range(100):
         ds["num", i] = 2 * i
     ds2 = ds.copy("./data/testing/cp_copy_ds_local_5")
+    Dataset.delete("testingacc/cp_copy_dataset_testing_2")
     ds3 = ds2.copy("testingacc/cp_copy_dataset_testing_2")
     for i in range(100):
         assert ds2["num", i].compute() == 2 * i

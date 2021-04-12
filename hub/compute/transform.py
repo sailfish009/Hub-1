@@ -256,7 +256,7 @@ class Transform:
             0
         ]  # here ds.indexes will always be a contiguous list as obtained after slicing
         for key, value in results.items():
-            chunk = ds[key].chunksize[0]
+            chunk = ds[key, 0].chunksize[0]
             chunk = 1 if chunk == 0 else chunk
             value = get_value(value)
             value = str_to_int(value, ds.dataset.tokenizer)

@@ -5,7 +5,7 @@ If a copy of the MPL was not distributed with this file, You can obtain one at h
 """
 
 from hub.compute.transform import Transform
-from hub.compute.ray import RayTransform, RayGeneratorTransform
+from hub.compute.ray import RayTransform
 from collections.abc import Iterable
 from hub.exceptions import NotIterable
 

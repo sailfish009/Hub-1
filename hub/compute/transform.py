@@ -137,7 +137,7 @@ class Transform:
             yield self[index]
 
     @classmethod
-    def _flatten_dict(self, d: Dict, parent_key="", schema=None):
+    def _flatten_dict(cls, d: Dict, parent_key="", schema=None):
         """| Helper function to flatten dictionary of a recursive tensor
 
         Parameters
@@ -148,10 +148,10 @@ class Transform:
         for k, v in d.items():
             new_key = parent_key + "/" + k if parent_key else k
             if isinstance(v, MutableMapping) and not isinstance(
-                self.dtype_from_path(new_key, schema), Sequence
+                cls.dtype_from_path(new_key, schema), Sequence
             ):
                 items.extend(
-                    self._flatten_dict(v, parent_key=new_key, schema=schema).items()
+                    cls._flatten_dict(v, parent_key=new_key, schema=schema).items()
                 )
             else:
                 items.append((new_key, v))
@@ -182,7 +182,8 @@ class Transform:
                 items.extend(r)
         return items
 
-    def _split_list_to_dicts(self, xs):
+    @classmethod
+    def _split_list_to_dicts(cls, xs, schema):
         """| Helper function that transform list of dicts into dicts of lists
 
         Parameters
@@ -195,9 +196,7 @@ class Transform:
         xs_new = {}
         for x in xs:
             if isinstance(x, list):
-                x = dict(
-                    zip(self._flatten_dict(self.schema, schema=self.schema).keys(), x)
-                )
+                x = dict(zip(cls._flatten_dict(schema, schema=schema).keys(), x))
 
             for key, value in x.items():
                 if key in xs_new:
@@ -349,8 +348,7 @@ class Transform:
         results = self.map(lambda x: self._flatten_dict(x, schema=self.schema), results)
         results = list(results)
 
-        results = self._split_list_to_dicts(results)
-
+        results = self._split_list_to_dicts(results, self.schema)
         results_values = list(results.values())
         if len(results_values) == 0:
             return 0

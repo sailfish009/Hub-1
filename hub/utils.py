@@ -7,11 +7,7 @@ If a copy of the MPL was not distributed with this file, You can obtain one at h
 import time
 from collections import abc
 from math import gcd
-
-from numpy.lib.arraysetops import isin
-
-from hub import defaults
-from hub.exceptions import ShapeLengthException
+from typing import Iterable
 
 
 def _flatten(list_):
@@ -180,6 +176,16 @@ def batchify(iterable, n=1, initial=None):
     for ndx in range(initial, ls, n):
         batches.append(iterable[ndx : min(ndx + n, ls)])
     return batches
+
+
+def batchify_generator(iterator: Iterable, size: int):
+    batch = []
+    for el in iterator:
+        batch.append(el)
+        if len(batch) >= size:
+            yield batch
+            batch = []
+    yield batch
 
 
 def _tuple_product(tuple_):

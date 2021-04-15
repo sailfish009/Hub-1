@@ -462,13 +462,13 @@ class MimiciiiCxr:
         with Timer("Total time"):
             with Timer("Time of first transform"):
                 ds1 = hub.transform(
-                    schema,
+                    schemai,
                     scheduler=args.scheduler,
                     workers=args.workers,
                 )(_right_size)(lines)
             with Timer("Time of second transform"):
                 ds2 = hub.transform(
-                    schema,
+                    schemai,
                     scheduler=args.scheduler,
                     workers=args.workers,
                 )(_check_files)(ds1)
@@ -493,7 +493,7 @@ def main():
     parser.add_argument(
         "-o",
         "--output",
-        default="s3://snark-gradient-raw-data/output_x_transform_new_4",
+        default="s3://snark-gradient-raw-data/output_x_transform_new_96_50000",
     )
     parser.add_argument("-w", "--workers", default=DEFAULT_WORKERS)
     parser.add_argument("-s", "--scheduler", default=DEFAULT_SCHEDULER)

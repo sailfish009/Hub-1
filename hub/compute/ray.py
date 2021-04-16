@@ -11,7 +11,6 @@ import math
 from collections import defaultdict
 from tqdm import tqdm
 import hub
-from ray.util.queue import Queue
 from hub.schema.features import featurify, SchemaDict
 from hub.store.shape_detector import ShapeDetector
 
@@ -109,7 +108,7 @@ def _func_argd(item, func, func_kwargs, x=True):
         return Transform._flatten_dict(result[0])
 
 
-def upload_data(key, value, ds_out, start_idx, end_idx, value_shape=None):
+def upload_data(key, value, ds_out, start_idx, end_idx, value_shape):
     tensor = ds_out._tensors[f"/{key}"]
     shape = None
     if tensor.is_dynamic:
@@ -119,8 +118,7 @@ def upload_data(key, value, ds_out, start_idx, end_idx, value_shape=None):
         key,
         start_idx:end_idx,
     ] = value
-    if value_shape:
-        value_shape[key] = (start_idx, end_idx, shape)
+    value_shape[key] = (start_idx, end_idx, shape)
 
 
 def empty_remote(template, **kwargs):
@@ -139,6 +137,7 @@ def empty_remote(template, **kwargs):
 
 try:
     import ray
+    from ray.util.queue import Queue
 
     remote = ray.remote
 except Exception:
@@ -209,7 +208,7 @@ class RayTransform(Transform):
         pbar,
     ):
         samples = []
-        value_shape = {}  # stores dynamic shape info which is written at the end
+        value_shapes = []  # stores dynamic shape info which is written at the end
         item_count = 0
         for item in ds_in:
             item_count += 1
@@ -232,6 +231,7 @@ class RayTransform(Transform):
                 current_samples = Transform._split_list_to_dicts(
                     current_samples, schema
                 )
+                value_shape = {}
                 for key, value in current_samples.items():
                     value = get_value(value)
                     value = str_to_int(value, ds_out.tokenizer)
@@ -242,9 +242,11 @@ class RayTransform(Transform):
                             key,
                             start_idx:end_idx,
                         ] = value
+                value_shapes.append(value_shape)
                 samples = samples[n_samples:]
+        ds_out.flush()
         ds_temp.flush()
-        return value_shape, samples
+        return value_shapes, samples
 
     def write_dynamic_shapes(self, ds_out, value_shapes_list):
         for value_shapes in value_shapes_list:
@@ -338,6 +340,8 @@ class RayTransform(Transform):
                 for worker_id in range(self.workers)
             ]
             value_shapes_list, samples = zip(*ray.get(work))
+            value_shapes_list = Transform._unwrap(value_shapes_list)
+            # print(value_shapes_list)
             self.write_dynamic_shapes(ds_out, value_shapes_list)
 
             # uploading the remaining samples
@@ -350,7 +354,10 @@ class RayTransform(Transform):
             ]
             samples = Transform._split_list_to_dicts(samples, self.schema)
             for key, value in samples.items():
-                upload_data(key, value, ds_out, start_idx, end_idx)
+                ds_out[
+                    key,
+                    start_idx:end_idx,
+                ] = value
             print(f"Size of output dataset is {end_idx}")
 
             # ds_out.resize_shape(end_idx + 1)

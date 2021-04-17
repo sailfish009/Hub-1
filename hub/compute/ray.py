@@ -3,7 +3,7 @@ from hub import Dataset
 from hub.api.datasetview import DatasetView
 from hub.utils import batchify_generator, batchify
 from hub.compute import Transform
-from typing import Iterable
+from typing import Iterable, Tuple
 from hub.exceptions import ModuleNotInstalledException
 from hub.api.dataset_utils import get_value, str_to_int
 import numpy as np
@@ -13,6 +13,7 @@ from tqdm import tqdm
 import hub
 from hub.schema.features import featurify, SchemaDict
 from hub.store.shape_detector import ShapeDetector
+from asyncio import Event
 
 
 def get_sample_size(schema, memory_per_worker):
@@ -38,7 +39,6 @@ def get_sample_size(schema, memory_per_worker):
         size_sum += size
     samples = memory_per_worker * 1024 * 1024 / size_sum
     samples = 2 ** math.floor(math.log2(samples))
-    # samples = samples * workers
     return samples
 
 
@@ -110,15 +110,15 @@ def _func_argd(item, func, func_kwargs, x=True):
 
 def upload_data(key, value, ds_out, start_idx, end_idx, value_shape):
     tensor = ds_out._tensors[f"/{key}"]
-    shape = None
     if tensor.is_dynamic:
         tensor.disable_dynamicness()
         shape = tensor.get_shape_from_value([slice(start_idx, end_idx)], value)
+        value_shape[key] = (start_idx, end_idx, shape)
     ds_out[
         key,
         start_idx:end_idx,
     ] = value
-    value_shape[key] = (start_idx, end_idx, shape)
+    ds_out.flush()
 
 
 def empty_remote(template, **kwargs):
@@ -142,6 +142,73 @@ try:
     remote = ray.remote
 except Exception:
     remote = empty_remote
+
+
+class ProgressBar:
+    # progress_actor:
+    # total: int
+    # description: str
+    # pbar: tqdm
+
+    def __init__(self, total: int, description: str = ""):
+        self.progress_actor = ProgressBarActor.remote()  # type: ignore
+        self.total = total
+        self.description = description
+
+    @property
+    def actor(self):
+        return self.progress_actor
+
+    def print_until_done(self) -> None:
+        pbar = tqdm(
+            desc=self.description, total=self.total, unit_scale=True, unit=" items"
+        )
+        while True:
+            delta, counter = ray.get(self.actor.wait_for_update.remote())
+            pbar.update(delta)
+            if counter >= self.total:
+                pbar.close()
+                return
+
+
+@ray.remote
+class ProgressBarActor:
+    counter: int
+    delta: int
+    event: Event
+
+    def __init__(self) -> None:
+        self.counter = 0
+        self.delta = 0
+        self.event = Event()
+
+    def update(self, num_items_completed: int) -> None:
+        """Updates the ProgressBar with the incremental
+        number of items that were just completed.
+        """
+        self.counter += num_items_completed
+        self.delta += num_items_completed
+        self.event.set()
+
+    async def wait_for_update(self) -> Tuple[int, int]:
+        """Blocking call.
+
+        Waits until somebody calls `update`, then returns a tuple of
+        the number of updates since the last call to
+        `wait_for_update`, and the total number of completed items.
+        """
+        await self.event.wait()
+        self.event.clear()
+        saved_delta = self.delta
+        self.delta = 0
+        return saved_delta, self.counter
+
+
+def get_counter(self) -> int:
+    """
+    Returns the total number of complete items.
+    """
+    return self.counter
 
 
 class RayTransform(Transform):
@@ -209,6 +276,7 @@ class RayTransform(Transform):
     ):
         samples = []
         value_shapes = []  # stores dynamic shape info which is written at the end
+        temp_value_shapes = []  # stores dynamic shape info for temp dataset
         item_count = 0
         for item in ds_in:
             item_count += 1
@@ -217,9 +285,8 @@ class RayTransform(Transform):
             samples.extend(results)
             while len(samples) >= n_samples:
                 idx = queue.get()
-                pbar.update(item_count)
+                pbar.update.remote(item_count)
                 queue.put(idx + 1)
-                print("index is", idx)
                 item_count = 0
                 start_idx = idx * n_samples
                 end_idx = start_idx + n_samples
@@ -232,21 +299,25 @@ class RayTransform(Transform):
                     current_samples, schema
                 )
                 value_shape = {}
+                temp_value_shape = {}
                 for key, value in current_samples.items():
                     value = get_value(value)
                     value = str_to_int(value, ds_out.tokenizer)
-                    if len(value) >= ds_out[key, 0].chunksize[0]:
+                    if n_samples >= ds_out[key, 0].chunksize[0]:
                         upload_data(key, value, ds_out, start_idx, end_idx, value_shape)
                     else:
-                        ds_temp[
-                            key,
-                            start_idx:end_idx,
-                        ] = value
+                        upload_data(
+                            key, value, ds_temp, start_idx, end_idx, temp_value_shape
+                        )
                 value_shapes.append(value_shape)
+                temp_value_shapes.append(temp_value_shape)
                 samples = samples[n_samples:]
+        idx = queue.get()
+        pbar.update.remote(item_count)
+        queue.put(idx)
         ds_out.flush()
         ds_temp.flush()
-        return value_shapes, samples
+        return value_shapes, temp_value_shapes, samples
 
     def write_dynamic_shapes(self, ds_out, value_shapes_list):
         for value_shapes in value_shapes_list:
@@ -308,60 +379,64 @@ class RayTransform(Transform):
         )  # only keeps those items whose chunks > n_samples
         ds_temp = Dataset(
             f"{url}_temp",
-            shape=10 * 1000 * 1000,
+            shape=1_000_000,
             token=token,
             public=public,
             schema=temp_schema,
+            mode="w",
+            cache=False,
         )
         ds_in = batchify(ds_in, batch_size)
         queue = Queue()
         queue.put(0)
-
-        with tqdm(
+        pbar = ProgressBar(
             total=length,
-            unit_scale=True,
-            unit=" items",
-            desc="Writing large tensors to dataset",
-        ) as pbar:
-            work = [
-                self.xtransform_upload_shard.remote(
-                    ds_in[worker_id],
-                    ds_out,
-                    ds_temp,
-                    self._func,
-                    self.kwargs,
-                    worker_id,
-                    self.workers,
-                    n_samples,
-                    self.schema,
-                    queue,
-                    pbar,
-                )
-                for worker_id in range(self.workers)
-            ]
-            value_shapes_list, samples = zip(*ray.get(work))
-            value_shapes_list = Transform._unwrap(value_shapes_list)
-            # print(value_shapes_list)
-            self.write_dynamic_shapes(ds_out, value_shapes_list)
+            description="Writing large tensors to dataset",
+        )
+        pbar_actor = pbar.actor
 
-            # uploading the remaining samples
-            samples = Transform._unwrap(samples)
-            idx = queue.get()
-            start_idx = idx * n_samples
-            end_idx = start_idx + len(samples)
-            samples = [
-                Transform._flatten_dict(item, schema=self.schema) for item in samples
-            ]
-            samples = Transform._split_list_to_dicts(samples, self.schema)
-            for key, value in samples.items():
-                ds_out[
-                    key,
-                    start_idx:end_idx,
-                ] = value
-            print(f"Size of output dataset is {end_idx}")
+        work = [
+            self.xtransform_upload_shard.remote(
+                ds_in[worker_id],
+                ds_out,
+                ds_temp,
+                self._func,
+                self.kwargs,
+                worker_id,
+                self.workers,
+                n_samples,
+                self.schema,
+                queue,
+                pbar_actor,
+            )
+            for worker_id in range(self.workers)
+        ]
+        pbar.print_until_done()
+        value_shapes_list, temp_value_shapes_list, samples = zip(*ray.get(work))
+        value_shapes_list = Transform._unwrap(value_shapes_list)
+        temp_value_shapes_list = Transform._unwrap(temp_value_shapes_list)
+        # print(value_shapes_list)
+        self.write_dynamic_shapes(ds_out, value_shapes_list)
+        self.write_dynamic_shapes(ds_temp, temp_value_shapes_list)
 
-            # ds_out.resize_shape(end_idx + 1)
-            ds_temp = ds_temp[0:start_idx]
+        # uploading the remaining samples
+        samples = Transform._unwrap(samples)
+        idx = queue.get()
+        start_idx = idx * n_samples
+        end_idx = start_idx + len(samples)
+        samples = [
+            Transform._flatten_dict(item, schema=self.schema) for item in samples
+        ]
+        samples = Transform._split_list_to_dicts(samples, self.schema)
+        for key, value in samples.items():
+            ds_out[
+                key,
+                start_idx:end_idx,
+            ] = value
+        print(f"Size of output dataset is {end_idx}")
+
+        # ds_out.resize_shape(end_idx + 1)
+        ds_temp = ds_temp[0:start_idx]
 
         @hub.transform(schema=temp_schema, scheduler="ray", workers=self.workers)
         def identity(sample):
@@ -411,7 +486,7 @@ class RayTransform(Transform):
         """
         _ds = ds or self.base_ds
         length = length or len(_ds)
-        length = 10_000_000 if x else length
+        length = 1_000_000 if x else length
         ds_out = ds_out or self.create_dataset(
             url, length=length, token=token, public=public
         )

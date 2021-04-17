@@ -74,7 +74,7 @@ class MimiciiiCxr:
             "subject_id": schema.Text((SMALL_TEXT_LEN,), dtype="uint8"),
             "study_date": schema.Text((SMALL_TEXT_LEN,), dtype="uint8"),
             "study_time": schema.Text(max_shape=(MEDIUM_TEXT_LEN,), dtype="uint8"),
-            "report": schema.Text(max_shape=(LARGE_TEXT_LEN,), dtype="uint8"),
+            "report": schema.Text(max_shape=(LARGE_TEXT_LEN,), dtype="uint8"),  # fix
             "label_chexpert": schema.ClassLabel(
                 shape=(14,), names=list(_LABELS.values())
             ),
@@ -459,31 +459,22 @@ class MimiciiiCxr:
         schemai = self._intermitidate_schema()
         print("Number of samples: ", len(lines))
         lines = lines[:20000]
-        with Timer("Total time"):
-            with Timer("Time of first transform"):
-                ds1 = hub.transform(
-                    schemai,
-                    scheduler=args.scheduler,
-                    workers=args.workers,
-                )(_right_size)(lines)
-            with Timer("Time of second transform"):
-                ds2 = hub.transform(
-                    schemai,
-                    scheduler=args.scheduler,
-                    workers=args.workers,
-                )(_check_files)(ds1)
-            with Timer("Time of third transform"):
-                ds3 = hub.transform(
-                    schema_,
-                    scheduler=args.scheduler,
-                    workers=args.workers,
-                )(_process_example)(ds2)
-                ds3 = ds3.store(f"{output_dir}/ds3")
-        print("Success, number of elements for phase 3:", len(ds3))
+        ds1 = hub.transform(schemai, scheduler=args.scheduler, workers=args.workers,)(
+            _right_size
+        )(lines)
+        ds2 = hub.transform(schemai, scheduler=args.scheduler, workers=args.workers,)(
+            _check_files
+        )(ds1)
+        ds3 = hub.transform(schema_, scheduler=args.scheduler, workers=args.workers,)(
+            _process_example
+        )(ds2)
+        with Timer("Transformation complete. Total time: "):
+            ds3 = ds3.store(f"{output_dir}/ds3")
+        print("The transforma is successful")
 
 
 def main():
-    DEFAULT_WORKERS = 96
+    DEFAULT_WORKERS = 50
     DEFAULT_SCHEDULER = "ray"
     ray.init(address="auto")
     parser = argparse.ArgumentParser()
@@ -493,7 +484,7 @@ def main():
     parser.add_argument(
         "-o",
         "--output",
-        default="s3://snark-gradient-raw-data/output_x_transform_new_96_50000",
+        default="s3://snark-gradient-raw-data/xtransform_50_20000",
     )
     parser.add_argument("-w", "--workers", default=DEFAULT_WORKERS)
     parser.add_argument("-s", "--scheduler", default=DEFAULT_SCHEDULER)

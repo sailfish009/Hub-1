@@ -484,7 +484,7 @@ def main():
     parser.add_argument(
         "-o",
         "--output",
-        default="s3://snark-gradient-raw-data/xtransform_50_20000",
+        default="s3://snark-gradient-raw-data/transform_50_20000_x",
     )
     parser.add_argument("-w", "--workers", default=DEFAULT_WORKERS)
     parser.add_argument("-s", "--scheduler", default=DEFAULT_SCHEDULER)

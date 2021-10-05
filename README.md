@@ -32,6 +32,23 @@
 
 <h3 align="center"> Introducing Data 2.0, powered by Hub. </br>The fastest way to store, access & manage datasets with version-control for PyTorch/TensorFlow.  Works locally or on any cloud. Scalable data pipelines.</h3>
 
+tldr; we launched Hub 2.0 and made it 100x faster (and easier)
+
+Hi there,
+
+Wanted to drop a note and personally thank you for being a Hub (https://github.com/activeloopai/Hub) supporter. You've followed the project for a while, and I wanted to ask if you had a chance to try the new version of Hub - Hub 2.0. In June, we decided to rebuild the entire codebase based on user feedback.
+
+Today, Hub 2.0 is up to 100x faster than 1.0. We aimed to provide a simple API for creating, storing, versioning, and collaborating on AI datasets of any size. With Hub, you can rapidly transform and stream data while training models at scale.
+
+Our goal was to make it super simple and fast. With parallel 16 workers, you can upload a 1.8M image dataset in 50 mins! See the code here.
+
+Not going to lie; we're pretty proud! But most of all, we care about feedback from the open-source community. Would you be able to give the new Hub a try and let us know what you think?
+
+You can also read the new docs, check the resources, and let us know if you have any questions in the Community Slack!
+
+﻿Warmly,
+Mikayel
+
 ---
 
 [ English | [Français](./README_translations/README_FR.md) | [简体中文](./README_translations/README_CN.md) | [Türkçe](./README_translations/README_TR.md) | [한글](./README_translations/README_KR.md) | [Bahasa Indonesia](./README_translations/README_ID.md)] | [Русский](./README_translations/README_RU.md)]
